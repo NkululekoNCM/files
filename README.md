@@ -1,7 +1,11 @@
-# Week 1 – CRUD Web App (Flask + PostgreSQL, Dockerized)
+# Week 1 – Project Tracker (Flask + PostgreSQL, Dockerized)
 
 Part of the **Mid-Level Cloud Engineering Project (4 Weeks)**.
 Week 1 goal: build a CRUD app, containerize it, connect it to PostgreSQL, and get it ready to push to Docker Hub.
+
+## Scenario
+A startup needs a simple internal tool to track projects across teams —
+what each project is called, its budget, current status, and deadline.
 
 ## Stack
 - Python 3.12 / Flask
@@ -9,23 +13,25 @@ Week 1 goal: build a CRUD app, containerize it, connect it to PostgreSQL, and ge
 - Docker + Docker Compose
 - Gunicorn (production WSGI server inside the container)
 
-## Resource: `items`
-| field       | type      |
-|-------------|-----------|
-| id          | serial pk |
-| name        | string    |
-| description | text      |
-| created_at  | timestamp |
+## Resource: `projects`
+| field       | type                                |
+|-------------|--------------------------------------|
+| id          | serial pk                           |
+| title       | string                              |
+| budget      | numeric                             |
+| status      | string (`open` / `in-progress` / `completed`) |
+| deadline    | date (`YYYY-MM-DD`)                 |
+| created_at  | timestamp                           |
 
 ## API Endpoints
-| Method | Path          | Description       |
-|--------|---------------|--------------------|
-| GET    | /health       | Health check       |
-| GET    | /items        | List all items     |
-| GET    | /items/<id>   | Get one item       |
-| POST   | /items        | Create an item     |
-| PUT    | /items/<id>   | Update an item     |
-| DELETE | /items/<id>   | Delete an item     |
+| Method | Path             | Description         |
+|--------|------------------|----------------------|
+| GET    | /health          | Health check         |
+| GET    | /projects        | List all projects    |
+| GET    | /projects/<id>   | Get one project      |
+| POST   | /projects        | Create a project     |
+| PUT    | /projects/<id>   | Update a project     |
+| DELETE | /projects/<id>   | Delete a project     |
 
 ## Run locally with Docker Compose (recommended)
 This spins up the app **and** a Postgres database together:
@@ -40,11 +46,11 @@ Test it:
 ```bash
 curl http://localhost:5000/health
 
-curl -X POST http://localhost:5000/items \
+curl -X POST http://localhost:5000/projects \
   -H "Content-Type: application/json" \
-  -d '{"name": "First item", "description": "Testing the API"}'
+  -d '{"title": "Website Redesign", "budget": 15000, "status": "open", "deadline": "2026-12-01"}'
 
-curl http://localhost:5000/items
+curl http://localhost:5000/projects
 ```
 
 Stop and remove containers:
