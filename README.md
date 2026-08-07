@@ -88,7 +88,7 @@ docker push <your-dockerhub-username>/week1-crud-app:latest
 ```
 .
 ├── app.py                # Flask CRUD application
-├── requirements.txt      # Python dependencies
+├── requirements.txt    
 ├── Dockerfile             # App container image definition
 ├── docker-compose.yml     # Local app + Postgres stack
 ├── .env.example           # Sample environment variables
