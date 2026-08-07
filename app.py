@@ -1,16 +1,19 @@
 """
 Mid-Level Cloud Engineering Project - Week 1
-Simple Flask CRUD application backed by PostgreSQL.
+Project Tracker - a simple Flask CRUD app backed by PostgreSQL.
 
-Resource: "items" (id, name, description, created_at)
+Scenario: a startup needs an internal tool to track projects across teams -
+what they're called, their budget, current status, and deadline.
+
+Resource: "projects" (id, title, budget, status, deadline, created_at)
 
 Endpoints:
-  GET    /health          -> health check (used by ALB target group later)
-  GET    /items            -> list all items
-  GET    /items/<id>       -> get one item
-  POST   /items            -> create item
-  PUT    /items/<id>       -> update item
-  DELETE /items/<id>       -> delete item
+  GET    /health             -> health check (used by ALB target group later)
+  GET    /projects            -> list all projects
+  GET    /projects/<id>       -> get one project
+  POST   /projects            -> create project
+  PUT    /projects/<id>       -> update project
+  DELETE /projects/<id>       -> delete project
 """
 
 import os
@@ -30,6 +33,9 @@ DB_CONFIG = {
     "user": os.environ.get("DB_USER", "appuser"),
     "password": os.environ.get("DB_PASSWORD", "apppassword"),
 }
+
+# Allowed project statuses
+VALID_STATUSES = ("open", "in-progress", "completed")
 
 
 def get_connection(retries=10, delay=3):
@@ -52,10 +58,12 @@ def init_db():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS items (
+                CREATE TABLE IF NOT EXISTS projects (
                     id SERIAL PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
+                    title VARCHAR(255) NOT NULL,
+                    budget NUMERIC(12, 2),
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    deadline DATE,
                     created_at TIMESTAMP DEFAULT NOW()
                 );
                 """
@@ -70,24 +78,29 @@ def health():
     return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()}), 200
 
 
-@app.route("/items", methods=["GET"])
-def list_items():
+@app.route("/projects", methods=["GET"])
+def list_projects():
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, name, description, created_at FROM items ORDER BY id;")
+            cur.execute(
+                "SELECT id, title, budget, status, deadline, created_at FROM projects ORDER BY id;"
+            )
             rows = cur.fetchall()
         return jsonify([dict(r) for r in rows]), 200
     finally:
         conn.close()
 
 
-@app.route("/items/<int:item_id>", methods=["GET"])
-def get_item(item_id):
+@app.route("/projects/<int:project_id>", methods=["GET"])
+def get_project(project_id):
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, name, description, created_at FROM items WHERE id = %s;", (item_id,))
+            cur.execute(
+                "SELECT id, title, budget, status, deadline, created_at FROM projects WHERE id = %s;",
+                (project_id,),
+            )
             row = cur.fetchone()
         if row is None:
             return jsonify({"error": "not found"}), 404
@@ -96,21 +109,30 @@ def get_item(item_id):
         conn.close()
 
 
-@app.route("/items", methods=["POST"])
-def create_item():
+@app.route("/projects", methods=["POST"])
+def create_project():
     data = request.get_json(silent=True) or {}
-    name = data.get("name")
-    description = data.get("description", "")
+    title = data.get("title")
+    budget = data.get("budget")
+    status = data.get("status", "open")
+    deadline = data.get("deadline")  # expected format: "YYYY-MM-DD"
 
-    if not name:
-        return jsonify({"error": "'name' is required"}), 400
+    if not title:
+        return jsonify({"error": "'title' is required"}), 400
+
+    if status not in VALID_STATUSES:
+        return jsonify({"error": f"'status' must be one of {VALID_STATUSES}"}), 400
 
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "INSERT INTO items (name, description) VALUES (%s, %s) RETURNING id, name, description, created_at;",
-                (name, description),
+                """
+                INSERT INTO projects (title, budget, status, deadline)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, title, budget, status, deadline, created_at;
+                """,
+                (title, budget, status, deadline),
             )
             row = cur.fetchone()
         conn.commit()
@@ -119,28 +141,35 @@ def create_item():
         conn.close()
 
 
-@app.route("/items/<int:item_id>", methods=["PUT"])
-def update_item(item_id):
+@app.route("/projects/<int:project_id>", methods=["PUT"])
+def update_project(project_id):
     data = request.get_json(silent=True) or {}
-    name = data.get("name")
-    description = data.get("description")
+    title = data.get("title")
+    budget = data.get("budget")
+    status = data.get("status")
+    deadline = data.get("deadline")
+
+    if status is not None and status not in VALID_STATUSES:
+        return jsonify({"error": f"'status' must be one of {VALID_STATUSES}"}), 400
 
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id FROM items WHERE id = %s;", (item_id,))
+            cur.execute("SELECT id FROM projects WHERE id = %s;", (project_id,))
             if cur.fetchone() is None:
                 return jsonify({"error": "not found"}), 404
 
             cur.execute(
                 """
-                UPDATE items
-                SET name = COALESCE(%s, name),
-                    description = COALESCE(%s, description)
+                UPDATE projects
+                SET title = COALESCE(%s, title),
+                    budget = COALESCE(%s, budget),
+                    status = COALESCE(%s, status),
+                    deadline = COALESCE(%s, deadline)
                 WHERE id = %s
-                RETURNING id, name, description, created_at;
+                RETURNING id, title, budget, status, deadline, created_at;
                 """,
-                (name, description, item_id),
+                (title, budget, status, deadline, project_id),
             )
             row = cur.fetchone()
         conn.commit()
@@ -149,17 +178,17 @@ def update_item(item_id):
         conn.close()
 
 
-@app.route("/items/<int:item_id>", methods=["DELETE"])
-def delete_item(item_id):
+@app.route("/projects/<int:project_id>", methods=["DELETE"])
+def delete_project(project_id):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM items WHERE id = %s RETURNING id;", (item_id,))
+            cur.execute("DELETE FROM projects WHERE id = %s RETURNING id;", (project_id,))
             deleted = cur.fetchone()
         conn.commit()
         if deleted is None:
             return jsonify({"error": "not found"}), 404
-        return jsonify({"deleted_id": item_id}), 200
+        return jsonify({"deleted_id": project_id}), 200
     finally:
         conn.close()
 
