@@ -22,9 +22,9 @@ from datetime import datetime
 
 import psycopg2
 import psycopg2.extras
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static", static_url_path="")
 
 DB_CONFIG = {
     "host": os.environ.get("DB_HOST", "db"),
@@ -71,6 +71,12 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
+
+
+@app.route("/", methods=["GET"])
+def index():
+    """Serve the styled web UI."""
+    return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/health", methods=["GET"])

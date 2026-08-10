@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Project Tracker — Operations Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#12151b;
+    --panel:#1b212b;
+    --panel-2:#212836;
+    --line:#2a3140;
+    --text:#e9ecf2;
+    --muted:#8992a3;
+    --amber:#e3a23c;
+    --amber-dim:#4a3a20;
+    --blue:#5b8def;
+    --blue-dim:#1f2c47;
+    --green:#3fb68b;
+    --green-dim:#183a30;
+    --red:#e2596b;
+    --red-dim:#3a1f26;
+    --radius:10px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html,body{
+    margin:0;
+    padding:0;
+    background:var(--ink);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  body{
+    min-height:100vh;
+    padding: 48px 24px 96px;
+  }
+
+  .wrap{
+    max-width: 980px;
+    margin: 0 auto;
+  }
+
+  /* ---------- Header ---------- */
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin: 0 0 10px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:16px;
+    height:1px;
+    background:var(--amber);
+    display:inline-block;
+  }
+
+  h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size: clamp(32px, 5vw, 44px);
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+
+  .sub{
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0 0 32px;
+    max-width: 520px;
+    line-height: 1.5;
+  }
+
+  /* ---------- Stat strip ---------- */
+  .stats{
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow:hidden;
+    margin-bottom: 32px;
+    background: var(--panel);
+  }
+  .stat{
+    padding: 18px 20px;
+    border-right: 1px solid var(--line);
+  }
+  .stat:last-child{ border-right:none; }
+  .stat-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .stat-value{
+    font-family:'Space Grotesk', sans-serif;
+    font-size: 24px;
+    font-weight: 600;
+  }
+  .stat-value.amber{ color: var(--amber); }
+
+  @media (max-width: 640px){
+    .stats{ grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(2){ border-right:none; }
+  }
+
+  /* ---------- Toolbar ---------- */
+  .toolbar{
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .toolbar h2{
+    font-family:'Space Grotesk', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    margin:0;
+    color: var(--text);
+  }
+  .toolbar h2 span{ color: var(--muted); font-weight: 400; }
+
+  button{
+    font-family:'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 13.5px;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform .08s ease, background .15s ease, border-color .15s ease;
+  }
+  button:active{ transform: scale(0.97); }
+  button:focus-visible{ outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  .btn-primary{
+    background: var(--amber);
+    color: #1a1305;
+    padding: 10px 16px;
+  }
+  .btn-primary:hover{ background:#edb457; }
+
+  .btn-ghost{
+    background: transparent;
+    border-color: var(--line);
+    color: var(--muted);
+    padding: 9px 14px;
+  }
+  .btn-ghost:hover{ border-color:#3a4257; color:var(--text); }
+
+  /* ---------- Add form (drawer) ---------- */
+  .drawer{
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height .28s ease, opacity .22s ease, margin .28s ease, padding .28s ease;
+    margin-bottom: 0;
+  }
+  .drawer.open{
+    max-height: 340px;
+    opacity: 1;
+    margin-bottom: 20px;
+    padding: 20px;
+  }
+
+  .form-grid{
+    display:grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 700px){
+    .form-grid{ grid-template-columns: 1fr 1fr; }
+  }
+
+  .field label{
+    display:block;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .field input, .field select{
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 9px 10px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
+  }
+  .field input:focus, .field select:focus{
+    outline: none;
+    border-color: var(--amber);
+  }
+
+  .form-actions{
+    display:flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
+  .error-text{
+    color: var(--red);
+    font-size: 12.5px;
+    margin: -4px 0 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    display:none;
+  }
+  .error-text.show{ display:block; }
+
+  /* ---------- Ledger table ---------- */
+  .ledger{
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  .ledger-head{
+    display:grid;
+    grid-template-columns: 4px 2.4fr 1fr 1fr 100px 78px;
+    padding: 12px 18px 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .ledger-head span{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .ledger-head span:nth-child(4), .ledger-head span:nth-child(5){ text-align: right; }
+
+  .row{
+    display:grid;
+    grid-template-columns: 4px 2.4fr 1fr 1fr 100px 78px;
+    align-items:center;
+    padding: 16px 18px 16px 0;
+    border-bottom: 1px solid var(--line);
+    transition: background .15s ease;
+  }
+  .row:last-child{ border-bottom: none; }
+  .row:hover{ background: rgba(255,255,255,0.02); }
+
+  .flag{ align-self: stretch; }
+  .flag.open{ background: var(--blue); }
+  .flag.in-progress{ background: var(--amber); }
+  .flag.completed{ background: var(--green); }
+
+  .row-title{ padding-left: 18px; }
+  .row-title .name{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap: 6px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 20px;
+  }
+  .badge::before{ content:""; width:6px; height:6px; border-radius:50%; }
+  .badge.open{ background: var(--blue-dim); color:#a9c4fb; }
+  .badge.open::before{ background: var(--blue); }
+  .badge.in-progress{ background: var(--amber-dim); color:#f0c584; }
+  .badge.in-progress::before{ background: var(--amber); }
+  .badge.completed{ background: var(--green-dim); color:#8fdfc2; }
+  .badge.completed::before{ background: var(--green); }
+
+  .row-deadline{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .row-budget{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 14px;
+    text-align: right;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .row-actions{
+    display:flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  .icon-btn{
+    width: 30px;
+    height: 30px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    border-radius: 6px;
+    padding:0;
+  }
+  .icon-btn:hover{ color: var(--text); border-color: #3a4257; }
+  .icon-btn.danger:hover{ color: var(--red); border-color: var(--red); }
+
+  .ledger-total{
+    display:grid;
+    grid-template-columns: 4px 2.4fr 1fr 1fr 100px 78px;
+    padding: 14px 18px 14px 0;
+    background: var(--panel-2);
+  }
+  .ledger-total .row-title{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .ledger-total .row-budget{
+    font-weight: 600;
+    color: var(--amber);
+    font-size: 15px;
+  }
+
+  .empty{
+    padding: 56px 24px;
+    text-align:center;
+    color: var(--muted);
+  }
+  .empty .big{
+    font-family:'Space Grotesk', sans-serif;
+    font-size: 18px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
+  .toast{
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    opacity: 0;
+    pointer-events:none;
+    transition: opacity .2s ease, transform .2s ease;
+    font-family:'Inter', sans-serif;
+  }
+  .toast.show{
+    opacity:1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .toast.error{ border-color: var(--red); color:#f3aab5; }
+
+  @media (max-width: 700px){
+    .ledger-head{ display:none; }
+    .row, .ledger-total{
+      grid-template-columns: 4px 1fr;
+      row-gap: 8px;
+    }
+    .row-deadline, .row-budget{ text-align:left; padding-left:18px; }
+    .row-actions{ padding-left:18px; justify-content:flex-start; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="eyebrow">Internal tool · Startup ops</p>
+    <h1>Project Tracker</h1>
+    <p class="sub">Every project the team is running, its budget, and where it stands — kept like a ledger so nothing gets lost between teams.</p>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Total Projects</div>
+        <div class="stat-value" id="stat-total">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Open</div>
+        <div class="stat-value" id="stat-open">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">In Progress</div>
+        <div class="stat-value" id="stat-progress">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Total Budget</div>
+        <div class="stat-value amber" id="stat-budget">—</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <h2>Ledger <span id="ledger-count">· 0 entries</span></h2>
+      <button class="btn-primary" id="toggle-form-btn">+ New project</button>
+    </div>
+
+    <form class="drawer" id="add-drawer">
+      <div class="form-grid">
+        <div class="field">
+          <label for="f-title">Title</label>
+          <input id="f-title" type="text" placeholder="Website redesign" required />
+        </div>
+        <div class="field">
+          <label for="f-budget">Budget (USD)</label>
+          <input id="f-budget" type="number" min="0" step="0.01" placeholder="15000" />
+        </div>
+        <div class="field">
+          <label for="f-status">Status</label>
+          <select id="f-status">
+            <option value="open">Open</option>
+            <option value="in-progress">In progress</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-deadline">Deadline</label>
+          <input id="f-deadline" type="date" />
+        </div>
+      </div>
+      <div class="error-text" id="form-error"></div>
+      <div class="form-actions">
+        <button type="button" class="btn-ghost" id="cancel-btn">Cancel</button>
+        <button type="submit" class="btn-primary" id="save-btn">Add to ledger</button>
+      </div>
+    </form>
+
+    <div class="ledger" id="ledger-container">
+      <div class="ledger-head">
+        <span></span>
+        <span>Project</span>
+        <span>Status</span>
+        <span>Deadline</span>
+        <span>Budget</span>
+        <span></span>
+      </div>
+      <div id="rows"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+const API = '/projects';
+const rowsEl = document.getElementById('rows');
+const ledgerContainer = document.getElementById('ledger-container');
+const drawer = document.getElementById('add-drawer');
+const toggleBtn = document.getElementById('toggle-form-btn');
+const cancelBtn = document.getElementById('cancel-btn');
+const form = drawer;
+const formError = document.getElementById('form-error');
+const toast = document.getElementById('toast');
+
+let editingId = null;
+
+function showToast(msg, isError=false){
+  toast.textContent = msg;
+  toast.classList.toggle('error', isError);
+  toast.classList.add('show');
+  setTimeout(()=> toast.classList.remove('show'), 2600);
+}
+
+function money(n){
+  if (n === null || n === undefined) return '—';
+  const num = typeof n === 'string' ? parseFloat(n) : n;
+  return '$' + num.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+function formatDate(d){
+  if(!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString(undefined, {month:'short', day:'2-digit', year:'numeric'});
+}
+
+function statusLabel(s){
+  return s === 'in-progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function openDrawer(prefill=null){
+  drawer.classList.add('open');
+  formError.classList.remove('show');
+  if(prefill){
+    editingId = prefill.id;
+    document.getElementById('f-title').value = prefill.title || '';
+    document.getElementById('f-budget').value = prefill.budget || '';
+    document.getElementById('f-status').value = prefill.status || 'open';
+    document.getElementById('f-deadline').value = prefill.deadline || '';
+    document.getElementById('save-btn').textContent = 'Save changes';
+  } else {
+    editingId = null;
+    form.reset();
+    document.getElementById('save-btn').textContent = 'Add to ledger';
+  }
+}
+
+function closeDrawer(){
+  drawer.classList.remove('open');
+  editingId = null;
+  form.reset();
+}
+
+toggleBtn.addEventListener('click', ()=>{
+  if(drawer.classList.contains('open') && editingId === null){
+    closeDrawer();
+  } else {
+    openDrawer();
+  }
+});
+cancelBtn.addEventListener('click', closeDrawer);
+
+form.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const title = document.getElementById('f-title').value.trim();
+  const budget = document.getElementById('f-budget').value;
+  const status = document.getElementById('f-status').value;
+  const deadline = document.getElementById('f-deadline').value;
+
+  if(!title){
+    formError.textContent = 'A title is required.';
+    formError.classList.add('show');
+    return;
+  }
+
+  const payload = {
+    title,
+    budget: budget ? parseFloat(budget) : null,
+    status,
+    deadline: deadline || null
+  };
+
+  try{
+    let res;
+    if(editingId){
+      res = await fetch(`${API}/${editingId}`, {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+    } else {
+      res = await fetch(API, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+    }
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Something went wrong'}));
+      throw new Error(err.error || 'Request failed');
+    }
+    closeDrawer();
+    showToast(editingId ? 'Project updated' : 'Project added to ledger');
+    await loadProjects();
+  } catch(err){
+    formError.textContent = err.message;
+    formError.classList.add('show');
+  }
+});
+
+async function deleteProject(id, title){
+  if(!confirm(`Remove "${title}" from the ledger? This can't be undone.`)) return;
+  try{
+    const res = await fetch(`${API}/${id}`, { method: 'DELETE' });
+    if(!res.ok) throw new Error('Delete failed');
+    showToast('Project removed');
+    await loadProjects();
+  } catch(err){
+    showToast(err.message, true);
+  }
+}
+
+function render(projects){
+  document.getElementById('stat-total').textContent = projects.length;
+  document.getElementById('stat-open').textContent = projects.filter(p=>p.status==='open').length;
+  document.getElementById('stat-progress').textContent = projects.filter(p=>p.status==='in-progress').length;
+  const totalBudget = projects.reduce((sum,p)=> sum + (parseFloat(p.budget) || 0), 0);
+  document.getElementById('stat-budget').textContent = money(totalBudget);
+  document.getElementById('ledger-count').textContent = `· ${projects.length} ${projects.length === 1 ? 'entry' : 'entries'}`;
+
+  if(projects.length === 0){
+    rowsEl.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.innerHTML = `<div class="big">The ledger is empty</div><div>Add your first project to start tracking it.</div>`;
+    rowsEl.appendChild(empty);
+    return;
+  }
+
+  rowsEl.innerHTML = '';
+  projects.forEach(p=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <div class="flag ${p.status}"></div>
+      <div class="row-title">
+        <div class="name">${escapeHtml(p.title)}</div>
+        <span class="badge ${p.status}">${statusLabel(p.status)}</span>
+      </div>
+      <div></div>
+      <div class="row-deadline">${formatDate(p.deadline)}</div>
+      <div class="row-budget">${money(p.budget)}</div>
+      <div class="row-actions">
+        <button class="icon-btn edit-btn" title="Edit" aria-label="Edit project">✎</button>
+        <button class="icon-btn danger delete-btn" title="Delete" aria-label="Delete project">✕</button>
+      </div>
+    `;
+    row.querySelector('.edit-btn').addEventListener('click', ()=> openDrawer(p));
+    row.querySelector('.delete-btn').addEventListener('click', ()=> deleteProject(p.id, p.title));
+    rowsEl.appendChild(row);
+  });
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+async function loadProjects(){
+  try{
+    const res = await fetch(API);
+    if(!res.ok) throw new Error('Could not load projects');
+    const data = await res.json();
+    render(data);
+  } catch(err){
+    rowsEl.innerHTML = `<div class="empty"><div class="big">Couldn't reach the ledger</div><div>${err.message}</div></div>`;
+  }
+}
+
+loadProjects();
+</script>
+</body>
+</html>
