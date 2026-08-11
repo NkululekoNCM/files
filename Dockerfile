@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Copy app code ----
 COPY app.py .
+COPY static/ ./static/
 
 # ---- Create non-root user (security best practice) ----
 RUN useradd -m appuser
