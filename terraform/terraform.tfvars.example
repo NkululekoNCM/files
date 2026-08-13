@@ -1,0 +1,15 @@
+# Copy this file to terraform.tfvars and fill in your own values.
+# terraform.tfvars is gitignored - never commit real passwords to GitHub.
+
+aws_region   = "us-east-1"
+project_name = "week1-crud-app"
+
+docker_image = "YOUR_DOCKERHUB_USERNAME/week1-crud-app:latest"
+
+db_name     = "appdb"
+db_username = "appuser"
+db_password = "ChangeMe123!"   # use a strong password, do not commit the real one
+
+asg_min_size         = 2
+asg_max_size          = 4
+asg_desired_capacity = 2

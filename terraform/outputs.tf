@@ -1,0 +1,29 @@
+output "vpc_id" {
+  description = "ID of the VPC"
+  value       = aws_vpc.main.id
+}
+
+output "public_subnet_ids" {
+  description = "IDs of the public subnets"
+  value       = aws_subnet.public[*].id
+}
+
+output "private_subnet_ids" {
+  description = "IDs of the private subnets"
+  value       = aws_subnet.private[*].id
+}
+
+output "alb_dns_name" {
+  description = "Public DNS name of the load balancer - open this in a browser to reach the app"
+  value       = aws_lb.app.dns_name
+}
+
+output "rds_endpoint" {
+  description = "Connection endpoint for the RDS PostgreSQL instance"
+  value       = aws_db_instance.app_db.address
+}
+
+output "asg_name" {
+  description = "Name of the Auto Scaling Group"
+  value       = aws_autoscaling_group.app.name
+}
