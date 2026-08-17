@@ -98,11 +98,87 @@ docker push <your-dockerhub-username>/week1-crud-app:latest
 ```
 
 ## Notes for Week 2 (Terraform / AWS)
-- The container reads DB connection info from environment variables
-  (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`), so in AWS these
-  will point at the RDS PostgreSQL endpoint instead of the local `db` container.
-- `/health` is already implemented and ready to be used as the
-  Application Load Balancer target group health check path.
-- No secrets are hardcoded in the image — they're injected at runtime,
-  which lines up with the Week 4 requirement to use IAM roles / Parameter Store
-  instead of credentials in code.
+# Week 2 – Infrastructure as Code (Terraform)
+
+Part of the **Mid-Level Cloud Engineering Project (4 Weeks)**.
+Week 2 goal: provision the AWS infrastructure that the Week 1 Project Tracker app runs on, entirely through Terraform.
+
+## What this builds
+
+A production-style 3-tier AWS environment inside a custom VPC:
+
+- **Networking:** 1 VPC, 2 public subnets, 2 private subnets (across 2 Availability Zones), 1 Internet Gateway, 1 NAT Gateway, public + private route tables
+- **Compute:** Application Load Balancer (public subnets) → Auto Scaling Group of EC2 instances (private subnets), running the Week 1 app container pulled from Docker Hub
+- **Data:** RDS PostgreSQL instance in the private subnets, reachable only from the app instances
+- **Security:** three-tier security groups (ALB → App → DB, each locked to only the layer next to it), IAM role with AWS Systems Manager access instead of SSH keys
+- **Scaling:** CloudWatch alarms that scale the Auto Scaling Group up at 70% CPU and down at 30% CPU
+
+See `architecture-diagram.svg` for a visual of how these pieces connect.
+<img width="792" height="581" alt="Project Diagram3 drawio" src="https://github.com/user-attachments/assets/e8afa54a-0ff0-49cd-9fff-8ded8ff8b81a" />
+
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `main.tf` | All AWS resources: VPC, subnets, gateways, security groups, RDS, ALB, launch template, ASG, scaling policies |
+| `variables.tf` | Input variables with sensible defaults (region, CIDR blocks, instance sizes, etc.) |
+| `outputs.tf` | Values printed after `apply` — ALB DNS name, RDS endpoint, VPC ID, etc. |
+| `terraform.tfvars.example` | Template for your own variable values — copy to `terraform.tfvars` and fill in |
+| `user_data.sh.tpl` | Script each EC2 instance runs on boot: installs Docker, pulls the app image, starts the container |
+| `.gitignore` | Keeps `terraform.tfvars`, state files, and the `.terraform/` cache out of GitHub |
+
+## Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) installed
+- [AWS CLI](https://aws.amazon.com/cli/) installed and configured (`aws configure`) with valid credentials
+- An AWS account (Free Tier eligible sizes are used throughout, but the NAT Gateway and ALB are **not** Free Tier — see Cost notes below)
+
+## How to deploy
+
+```bash
+# 1. Copy the example vars file and fill in your own values
+cp terraform.tfvars.example terraform.tfvars
+# edit terraform.tfvars: set docker_image to your Docker Hub image, and a db_password
+# (avoid the characters / @ " and spaces - AWS RDS rejects them)
+
+# 2. Initialize Terraform (downloads the AWS provider)
+terraform init
+
+# 3. Preview what will be created - nothing is built yet
+terraform plan
+
+# 4. Build it for real
+terraform apply
+# type "yes" when prompted
+```
+
+After `apply` finishes, Terraform prints the outputs, including the load balancer's public address:
+
+```
+alb_dns_name = "week1-crud-app-alb-xxxxxxxxxx.us-east-1.elb.amazonaws.com"
+```
+
+Open that URL in a browser (`http://`, not `https://`) to reach the app. It can take a couple of minutes after `apply` finishes for the EC2 instances to finish booting, installing Docker, and pulling the image.
+
+## How to tear it down
+
+```bash
+terraform destroy
+# type "yes" when prompted
+```
+
+**Run this after you're done testing or taking screenshots.** The NAT Gateway and Application Load Balancer bill by the hour even when idle — leaving them running unnecessarily costs money for no benefit during a learning project.
+
+## Security decisions
+
+- App and database instances live in **private subnets** with no direct internet route — only reachable through the ALB (app) or from the app instances (database)
+- Security groups are scoped tightly: the database only accepts traffic from the app security group, not from any IP range
+- EC2 instances use an **IAM instance role with AWS Systems Manager** for remote access instead of SSH key pairs, so no port 22 is open anywhere
+- RDS storage is encrypted at rest
+- No credentials are hardcoded in `main.tf` — the database password is supplied via `terraform.tfvars`, which is gitignored and never committed
+
+## Notes for Week 3 (CI/CD)
+
+- The Auto Scaling Group's launch template already knows how to pull and run `var.docker_image` on boot, so a CI/CD pipeline just needs to build and push a new image to Docker Hub, then trigger an instance refresh on the ASG (or replace instances) to roll out the update.
+
