@@ -178,7 +178,84 @@ terraform destroy
 - RDS storage is encrypted at rest
 - No credentials are hardcoded in `main.tf` — the database password is supplied via `terraform.tfvars`, which is gitignored and never committed
 
-## Notes for Week 3 (CI/CD)
+# Week 3 – CI/CD & Deployment Automation
 
-- The Auto Scaling Group's launch template already knows how to pull and run `var.docker_image` on boot, so a CI/CD pipeline just needs to build and push a new image to Docker Hub, then trigger an instance refresh on the ASG (or replace instances) to roll out the update.
+Part of the **Mid-Level Cloud Engineering Project (4 Weeks)**.
+Week 3 goal: automatically build, push, and deploy the app whenever code is pushed to `main`, by SSH-ing into the running EC2 instances and restarting the container - as specified in the brief.
+
+## What changed in Week 2's infrastructure to support this
+
+Week 2 originally placed app instances in **private subnets** with no SSH access at all (Systems Manager only). To literally SSH in from GitHub Actions, two things had to change:
+
+1. **App instances moved to public subnets** with a public IP, since GitHub-hosted runners connect over the public internet and can't reach a private-subnet-only instance.
+2. **Port 22 opened** on the app security group, from `0.0.0.0/0`.
+
+### The tradeoff, stated plainly
+
+GitHub-hosted runners don't publish a fixed IP range, so there is no way to restrict port 22 to "just GitHub" - it has to accept SSH from anywhere. This is a real reduction in the security posture built in Week 2, done deliberately to satisfy the brief's literal SSH requirement.
+
+**The more locked-down alternative** (worth mentioning in your Week 4 write-up as the production-grade approach): keep app instances in private subnets, add a small **bastion host** in the public subnet with SSH restricted to specific IPs, and have the pipeline SSH into the bastion first, then hop to the private instances from there. That keeps the app tier fully unreachable from the internet while still allowing controlled SSH access. This project uses the simpler direct-SSH version to match the brief exactly, with this tradeoff documented rather than hidden.
+
+## What the pipeline does
+
+On every push to `main` that touches the app code (`app.py`, `requirements.txt`, `Dockerfile`, or `static/`):
+
+1. **Build & push job**
+   - Checks out the repo, logs in to Docker Hub, builds the image
+   - Pushes it tagged both `:latest` and `:<commit-sha>`
+
+2. **Deploy job** (runs only if the build succeeds)
+   - Looks up the public IP of every running instance in the Auto Scaling Group
+   - Sets up the SSH private key from a GitHub secret
+   - SSHes into each instance and runs `/opt/app/redeploy.sh` - a script written to each instance at boot time (see Week 2's `user_data.sh.tpl`) that pulls the latest image and restarts the container
+
+Keeping the redeploy logic in a script on the instance (rather than inline in the pipeline) means the pipeline never needs to know the database credentials - it just triggers a script that already has them.
+
+## Required GitHub secrets
+
+Go to your GitHub repo -> **Settings** -> **Secrets and variables** -> **Actions** -> **New repository secret**:
+
+| Secret name | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | A Docker Hub **access token** (see below) |
+| `AWS_ACCESS_KEY_ID` | Your AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | Your AWS secret key |
+| `SSH_PRIVATE_KEY` | The private key Terraform generated (see below) |
+
+### Getting the SSH private key
+Terraform generated an SSH key pair for you in Week 2. Retrieve the private key with:
+```bash
+terraform output -raw ssh_private_key
+```
+Copy the **entire output**, including the `-----BEGIN ... PRIVATE KEY-----` and `-----END ... PRIVATE KEY-----` lines, and paste it as the `SSH_PRIVATE_KEY` secret exactly as shown - don't add or remove any lines.
+
+### Creating a Docker Hub access token
+1. hub.docker.com -> avatar -> Account Settings -> Personal access tokens -> Generate new token
+2. Permission: Read & Write. Copy the token immediately - it's shown once.
+
+## Applying the updated infrastructure
+
+Before the pipeline will work, you need to apply the updated Week 2 Terraform (moves instances to public subnets, opens port 22, generates the key pair):
+
+```bash
+cd terraform
+terraform apply
+```
+
+Type `yes` when prompted. This will replace your existing EC2 instances (Terraform will show `~` or `-/+` next to the launch template and ASG) - a short blip in availability while the new instances come up, same as any deployment.
+
+## Trying it out
+
+1. Make sure all 5 secrets are added and `terraform apply` has been run
+2. Make a small, visible change to the app (e.g. tweak text in `static/index.html`)
+3. Commit and push to `main`
+4. GitHub repo -> **Actions** tab - watch the workflow run
+5. Once both jobs are green, reload your app's Load Balancer URL - the change should be live
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `.github/workflows/deploy.yml` | The GitHub Actions pipeline - build, push, SSH deploy |
 

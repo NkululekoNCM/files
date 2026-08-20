@@ -105,3 +105,15 @@ variable "db_allocated_storage" {
   type        = number
   default     = 20
 }
+
+# ---------------------------------------------------------------------------
+# SSH for Week 3 CI/CD - GitHub-hosted runners have no fixed IP, so this
+# has to stay open to the internet. See the Week 3 README for the tradeoff
+# and the bastion-host alternative for a locked-down version of this.
+# ---------------------------------------------------------------------------
+
+variable "ssh_allowed_cidr" {
+  description = "CIDR allowed to SSH into app instances. 0.0.0.0/0 is required for GitHub-hosted Actions runners (no fixed IP range)."
+  type        = string
+  default     = "0.0.0.0/0"
+}

@@ -1,0 +1,79 @@
+name: Build, Push, and Deploy
+
+# Trigger on every push to main that touches the app itself -
+# no need to redeploy if only the Terraform or docs changed.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "requirements.txt"
+      - "Dockerfile"
+      - "static/**"
+      - ".github/workflows/deploy.yml"
+
+env:
+  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/week1-crud-app
+  AWS_REGION: us-east-1
+  ASG_NAME: week1-crud-app-asg
+
+jobs:
+  build-and-push:
+    name: Build & push Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_IMAGE }}:latest
+            ${{ env.DOCKERHUB_IMAGE }}:${{ github.sha }}
+
+  deploy:
+    name: SSH into each instance and restart the container
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Look up the running instances' public IPs
+        id: ips
+        run: |
+          IPS=$(aws ec2 describe-instances \
+            --filters "Name=tag:aws:autoscaling:groupName,Values=${{ env.ASG_NAME }}" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].PublicIpAddress" \
+            --output text)
+          echo "Found instances: $IPS"
+          echo "ips=$IPS" >> "$GITHUB_OUTPUT"
+
+      - name: Set up the SSH private key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: SSH into each instance and redeploy
+        run: |
+          for ip in ${{ steps.ips.outputs.ips }}; do
+            echo "Deploying to $ip ..."
+            ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ec2-user@$ip \
+              "sudo bash /opt/app/redeploy.sh"
+            echo "$ip done."
+          done

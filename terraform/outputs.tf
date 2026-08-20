@@ -27,3 +27,9 @@ output "asg_name" {
   description = "Name of the Auto Scaling Group"
   value       = aws_autoscaling_group.app.name
 }
+
+output "ssh_private_key" {
+  description = "Private key for SSH access to app instances. Retrieve with: terraform output -raw ssh_private_key"
+  value       = tls_private_key.app.private_key_pem
+  sensitive   = true
+}
