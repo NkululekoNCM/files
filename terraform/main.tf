@@ -21,7 +21,6 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Latest Amazon Linux 2023 AMI, so we don't have to hardcode an AMI ID
 data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
@@ -32,6 +31,8 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 # ===========================================================================
 # Networking: VPC, subnets, gateways, route tables
 # ===========================================================================
@@ -41,17 +42,12 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
-    Name = "${var.project_name}-vpc"
-  }
+  tags = { Name = "${var.project_name}-vpc" }
 }
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${var.project_name}-igw"
-  }
+  tags   = { Name = "${var.project_name}-igw" }
 }
 
 resource "aws_subnet" "public" {
@@ -61,9 +57,7 @@ resource "aws_subnet" "public" {
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
 
-  tags = {
-    Name = "${var.project_name}-public-${count.index + 1}"
-  }
+  tags = { Name = "${var.project_name}-public-${count.index + 1}" }
 }
 
 resource "aws_subnet" "private" {
@@ -72,32 +66,21 @@ resource "aws_subnet" "private" {
   cidr_block        = var.private_subnet_cidrs[count.index]
   availability_zone = data.aws_availability_zones.available.names[count.index]
 
-  tags = {
-    Name = "${var.project_name}-private-${count.index + 1}"
-  }
+  tags = { Name = "${var.project_name}-private-${count.index + 1}" }
 }
 
-# ---- NAT Gateway (lets private-subnet instances reach the internet, e.g. to pull the Docker image) ----
 resource "aws_eip" "nat" {
   domain = "vpc"
-
-  tags = {
-    Name = "${var.project_name}-nat-eip"
-  }
+  tags   = { Name = "${var.project_name}-nat-eip" }
 }
 
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public[0].id
-
-  tags = {
-    Name = "${var.project_name}-nat"
-  }
-
-  depends_on = [aws_internet_gateway.igw]
+  tags          = { Name = "${var.project_name}-nat" }
+  depends_on    = [aws_internet_gateway.igw]
 }
 
-# ---- Route tables ----
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -106,9 +89,7 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.igw.id
   }
 
-  tags = {
-    Name = "${var.project_name}-public-rt"
-  }
+  tags = { Name = "${var.project_name}-public-rt" }
 }
 
 resource "aws_route_table_association" "public" {
@@ -125,9 +106,7 @@ resource "aws_route_table" "private" {
     nat_gateway_id = aws_nat_gateway.nat.id
   }
 
-  tags = {
-    Name = "${var.project_name}-private-rt"
-  }
+  tags = { Name = "${var.project_name}-private-rt" }
 }
 
 resource "aws_route_table_association" "private" {
@@ -160,14 +139,12 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.project_name}-alb-sg"
-  }
+  tags = { Name = "${var.project_name}-alb-sg" }
 }
 
 resource "aws_security_group" "app" {
-  name        = "${var.project_name}-app-sg"
-  description = "Allow app traffic from the ALB only"
+  name_prefix = "${var.project_name}-app-sg-"
+  description = "Allow app traffic from the ALB, and SSH for the CI/CD pipeline"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -178,8 +155,10 @@ resource "aws_security_group" "app" {
     security_groups = [aws_security_group.alb.id]
   }
 
+  # SEE README "Week 4 security tradeoffs": open to 0.0.0.0/0 because
+  # GitHub-hosted Actions runners have no fixed IP range to restrict to.
   ingress {
-    description = "SSH for the Week 3 CI/CD pipeline (GitHub-hosted runners have no fixed IP)"
+    description = "SSH for GitHub Actions deploy pipeline (see README tradeoff)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -193,9 +172,7 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.project_name}-app-sg"
-  }
+  tags = { Name = "${var.project_name}-app-sg" }
 }
 
 resource "aws_security_group" "db" {
@@ -218,13 +195,54 @@ resource "aws_security_group" "db" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.project_name}-db-sg"
-  }
+  tags = { Name = "${var.project_name}-db-sg" }
 }
 
 # ===========================================================================
-# IAM role for EC2 (SSM access instead of SSH keys - least privilege)
+# SSH key pair (for the Week 3 GitHub Actions deploy pipeline)
+# ===========================================================================
+
+resource "tls_private_key" "app" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "app" {
+  key_name   = "${var.project_name}-key"
+  public_key = tls_private_key.app.public_key_openssh
+}
+
+# ===========================================================================
+# Secrets: AWS Systems Manager Parameter Store (Week 4)
+# The DB password is never written into the launch template or instance
+# metadata - each instance fetches it at boot/deploy time, scoped to only
+# this one parameter via IAM (least privilege).
+# ===========================================================================
+
+resource "aws_ssm_parameter" "db_password" {
+  name        = "/${var.project_name}/db_password"
+  description = "PostgreSQL master password for ${var.project_name}"
+  type        = "SecureString"
+  value       = var.db_password
+
+  tags = { Name = "${var.project_name}-db-password" }
+}
+
+# ===========================================================================
+# CloudWatch Logs (Week 4)
+# ===========================================================================
+
+resource "aws_cloudwatch_log_group" "app" {
+  name              = "/${var.project_name}/app"
+  retention_in_days = var.log_retention_days
+
+  tags = { Name = "${var.project_name}-app-logs" }
+}
+
+# ===========================================================================
+# IAM role for EC2 - least privilege: SSM Session Manager (break-glass
+# access) + read access to exactly one Parameter Store secret + write
+# access to exactly one CloudWatch log group. No wildcard resources.
 # ===========================================================================
 
 resource "aws_iam_role" "app_instance" {
@@ -233,20 +251,46 @@ resource "aws_iam_role" "app_instance" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
     }]
   })
 }
 
-# Lets you connect to instances via AWS Systems Manager Session Manager
-# instead of opening port 22 / managing SSH key pairs.
+# Break-glass console access (Session Manager) - independent of the SSH
+# path the pipeline uses; useful if the SSH key is ever lost or rotated.
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.app_instance.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy" "ssm_param_read" {
+  name = "${var.project_name}-ssm-param-read"
+  role = aws_iam_role.app_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = aws_ssm_parameter.db_password.arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "cloudwatch_logs_write" {
+  name = "${var.project_name}-cloudwatch-logs-write"
+  role = aws_iam_role.app_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource = "${aws_cloudwatch_log_group.app.arn}:*"
+    }]
+  })
 }
 
 resource "aws_iam_instance_profile" "app_instance" {
@@ -262,9 +306,7 @@ resource "aws_db_subnet_group" "main" {
   name       = "${var.project_name}-db-subnet-group"
   subnet_ids = aws_subnet.private[*].id
 
-  tags = {
-    Name = "${var.project_name}-db-subnet-group"
-  }
+  tags = { Name = "${var.project_name}-db-subnet-group" }
 }
 
 resource "aws_db_instance" "app_db" {
@@ -284,12 +326,10 @@ resource "aws_db_instance" "app_db" {
   vpc_security_group_ids = [aws_security_group.db.id]
   publicly_accessible    = false
 
-  skip_final_snapshot = true # set to false for a real production database
+  skip_final_snapshot = true
   multi_az            = false
 
-  tags = {
-    Name = "${var.project_name}-db"
-  }
+  tags = { Name = "${var.project_name}-db" }
 }
 
 # ===========================================================================
@@ -303,9 +343,7 @@ resource "aws_lb" "app" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
-  tags = {
-    Name = "${var.project_name}-alb"
-  }
+  tags = { Name = "${var.project_name}-alb" }
 }
 
 resource "aws_lb_target_group" "app" {
@@ -323,9 +361,7 @@ resource "aws_lb_target_group" "app" {
     matcher             = "200"
   }
 
-  tags = {
-    Name = "${var.project_name}-tg"
-  }
+  tags = { Name = "${var.project_name}-tg" }
 }
 
 resource "aws_lb_listener" "http" {
@@ -337,20 +373,6 @@ resource "aws_lb_listener" "http" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
   }
-}
-
-# ===========================================================================
-# SSH key pair (generated by Terraform for the Week 3 CI/CD pipeline)
-# ===========================================================================
-
-resource "tls_private_key" "app" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-resource "aws_key_pair" "app" {
-  key_name   = "${var.project_name}-key"
-  public_key = tls_private_key.app.public_key_openssh
 }
 
 # ===========================================================================
@@ -367,26 +389,26 @@ resource "aws_launch_template" "app" {
     name = aws_iam_instance_profile.app_instance.name
   }
 
-  network_interfaces {
-    associate_public_ip_address = true
-    security_groups             = [aws_security_group.app.id]
-  }
+  vpc_security_group_ids = [aws_security_group.app.id]
 
+  # Note: the DB password is deliberately NOT passed here. Each instance
+  # fetches it from Parameter Store at boot (see user_data.sh.tpl), so it
+  # never appears in the launch template or EC2 instance metadata.
   user_data = base64encode(templatefile("${path.module}/user_data.sh.tpl", {
-    docker_image = var.docker_image
-    app_port     = var.app_port
-    db_host      = aws_db_instance.app_db.address
-    db_port      = aws_db_instance.app_db.port
-    db_name      = var.db_name
-    db_user      = var.db_username
-    db_password  = var.db_password
+    docker_image    = var.docker_image
+    app_port        = var.app_port
+    db_host         = aws_db_instance.app_db.address
+    db_port         = aws_db_instance.app_db.port
+    db_name         = var.db_name
+    db_user         = var.db_username
+    db_password_ssm = aws_ssm_parameter.db_password.name
+    aws_region      = var.aws_region
+    log_group       = aws_cloudwatch_log_group.app.name
   }))
 
   tag_specifications {
     resource_type = "instance"
-    tags = {
-      Name = "${var.project_name}-app-instance"
-    }
+    tags          = { Name = "${var.project_name}-app-instance" }
   }
 
   lifecycle {
@@ -410,10 +432,6 @@ resource "aws_autoscaling_group" "app" {
     version = "$Latest"
   }
 
-  # Rolling instance refresh: whenever the launch template changes (new AMI,
-  # new key pair, etc.) or the target subnets change, replace instances a few
-  # at a time instead of all at once - keeps the app available throughout,
-  # and doubles as a simple blue/green-style rollout.
   instance_refresh {
     strategy = "Rolling"
     preferences {
@@ -430,14 +448,14 @@ resource "aws_autoscaling_group" "app" {
   }
 }
 
-# ---- Auto Scaling policies: scale up at 70% CPU, down at 30% (Week 4 requirement) ----
+# ---- Auto Scaling policies: scale up at 70% CPU, down at 30% ----
 
 resource "aws_autoscaling_policy" "scale_up" {
-  name                   = "${var.project_name}-scale-up"
-  autoscaling_group_name = aws_autoscaling_group.app.name
-  adjustment_type        = "ChangeInCapacity"
+  name                    = "${var.project_name}-scale-up"
+  autoscaling_group_name  = aws_autoscaling_group.app.name
+  adjustment_type         = "ChangeInCapacity"
   scaling_adjustment      = 1
-  cooldown               = 120
+  cooldown                = 120
 }
 
 resource "aws_cloudwatch_metric_alarm" "cpu_high" {
@@ -458,11 +476,11 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
 }
 
 resource "aws_autoscaling_policy" "scale_down" {
-  name                   = "${var.project_name}-scale-down"
-  autoscaling_group_name = aws_autoscaling_group.app.name
-  adjustment_type        = "ChangeInCapacity"
+  name                    = "${var.project_name}-scale-down"
+  autoscaling_group_name  = aws_autoscaling_group.app.name
+  adjustment_type         = "ChangeInCapacity"
   scaling_adjustment      = -1
-  cooldown               = 120
+  cooldown                = 120
 }
 
 resource "aws_cloudwatch_metric_alarm" "cpu_low" {

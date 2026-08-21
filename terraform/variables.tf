@@ -21,13 +21,13 @@ variable "vpc_cidr" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "CIDR blocks for the 2 public subnets (ALB, NAT Gateway)"
+  description = "CIDR blocks for the 2 public subnets (ALB, NAT Gateway, app instances)"
   type        = list(string)
   default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
 variable "private_subnet_cidrs" {
-  description = "CIDR blocks for the 2 private subnets (app instances, RDS)"
+  description = "CIDR blocks for the 2 private subnets (RDS)"
   type        = list(string)
   default     = ["10.0.11.0/24", "10.0.12.0/24"]
 }
@@ -89,7 +89,7 @@ variable "db_username" {
 }
 
 variable "db_password" {
-  description = "PostgreSQL master password (set this in terraform.tfvars, never commit it)"
+  description = "PostgreSQL master password. Stored in AWS Systems Manager Parameter Store (SecureString), never written into the launch template or instance metadata. Set this in terraform.tfvars, never commit it. AWS RDS forbids '/', '@', '\"' and spaces in the password."
   type        = string
   sensitive   = true
 }
@@ -107,13 +107,17 @@ variable "db_allocated_storage" {
 }
 
 # ---------------------------------------------------------------------------
-# SSH for Week 3 CI/CD - GitHub-hosted runners have no fixed IP, so this
-# has to stay open to the internet. See the Week 3 README for the tradeoff
-# and the bastion-host alternative for a locked-down version of this.
+# Security (Week 4)
 # ---------------------------------------------------------------------------
 
 variable "ssh_allowed_cidr" {
-  description = "CIDR allowed to SSH into app instances. 0.0.0.0/0 is required for GitHub-hosted Actions runners (no fixed IP range)."
+  description = "CIDR allowed to SSH into app instances. NOTE: this is deliberately left at 0.0.0.0/0 because the Week 3 GitHub Actions pipeline SSHes in from GitHub-hosted runners, which do not publish a fixed IP range - there is no CIDR that covers 'just GitHub'. This is a real, documented reduction in security posture; see README's 'Week 4 security tradeoffs' section for the production-grade fix (a bastion host, or switching the pipeline to SSM)."
   type        = string
   default     = "0.0.0.0/0"
+}
+
+variable "log_retention_days" {
+  description = "How many days to keep application logs in CloudWatch"
+  type        = number
+  default     = 14
 }

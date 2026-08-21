@@ -259,3 +259,102 @@ Type `yes` when prompted. This will replace your existing EC2 instances (Terrafo
 |---|---|
 | `.github/workflows/deploy.yml` | The GitHub Actions pipeline - build, push, SSH deploy |
 
+
+# Week 4 – Monitoring, Scaling & Security
+
+Part of the **Mid-Level Cloud Engineering Project (4 Weeks)**.
+
+## What's new this week
+
+1. **Secrets moved to AWS Systems Manager Parameter Store.** The database
+   password is stored as a `SecureString` parameter (`/week1-crud-app/db_password`)
+   instead of being written into the launch template or EC2 user data. Each
+   instance fetches it at boot/deploy time via the AWS CLI, using an IAM
+   permission scoped to that one parameter only.
+2. **CloudWatch Logs.** The app container now ships its logs to CloudWatch
+   (`/week1-crud-app/app` log group, 14-day retention) using Docker's built-in
+   `awslogs` log driver - no separate logging agent to install or manage.
+3. **Least-privilege IAM**, reviewed end to end (see below).
+4. **Auto Scaling verification** - the scale-up/scale-down alarms built in
+   Week 2 are now tested under real load (see "Testing the scaling policy").
+
+## Security decisions - the full picture
+
+| Requirement | Status | Notes |
+|---|---|---|
+| IAM roles, no access keys in code | ✅ Done | EC2 instances use an IAM instance role. No AWS credentials are ever written into Terraform files, user data, or the app. |
+| Restrict SSH access | ⚠️ **Partial - documented tradeoff** | See below. |
+| Encrypt RDS | ✅ Done | `storage_encrypted = true` on the RDS instance. |
+| Secrets in Parameter Store | ✅ Done | DB password is a SecureString parameter, fetched at runtime, not embedded anywhere static. |
+| Least privilege | ✅ Done | See IAM breakdown below. |
+
+### The SSH tradeoff, stated plainly
+
+Week 3's CI/CD pipeline SSHes into the EC2 instances directly from GitHub-hosted
+Actions runners. Those runners don't publish a fixed IP range, so there is no
+CIDR block that means "just GitHub" - the app security group's SSH rule has to
+stay open to `0.0.0.0/0` for the pipeline to keep working. This is a real,
+intentional reduction in security posture, kept because the project brief asks
+for a literal SSH-based deploy pipeline.
+
+**The production-grade fix**, worth naming even though it isn't implemented
+here: either (a) put the app instances back in private subnets behind a small
+bastion host with SSH restricted to specific IPs, and have the pipeline hop
+through the bastion, or (b) switch the deploy step from SSH to AWS Systems
+Manager `send-command` (which the IAM role already supports as break-glass
+access) - eliminating the need for port 22 to be open at all. Both are
+reasonable next steps for a real production system; this project keeps the
+simpler direct-SSH version to match the brief, with the tradeoff documented
+rather than hidden.
+
+### IAM least-privilege breakdown
+
+The EC2 instance role (`week1-crud-app-app-instance-role`) has exactly three
+permissions, each scoped as tightly as possible:
+
+| Policy | Scope | Why |
+|---|---|---|
+| `AmazonSSMManagedInstanceCore` | AWS managed policy | Break-glass console access via Session Manager, independent of the SSH path - useful if the SSH key is ever lost. |
+| `ssm:GetParameter` | Only `/week1-crud-app/db_password` (one specific ARN) | Nothing else in Parameter Store is readable, even other parameters in the same account. |
+| `logs:CreateLogStream`, `logs:PutLogEvents` | Only the `/week1-crud-app/app` log group | Can't write to or read any other log group. |
+
+No policy uses a wildcard `Resource: "*"`.
+
+## Testing the Auto Scaling policy
+
+The scale-up/scale-down CloudWatch alarms were created in Week 2. To actually
+trigger and screenshot a scaling event:
+
+1. Connect to a running instance (Session Manager: EC2 Console → select an
+   instance → **Connect** → **Session Manager** tab → **Connect**)
+2. Generate CPU load to cross the 70% threshold:
+   ```bash
+   sudo dnf install -y stress
+   stress --cpu 2 --timeout 300
+   ```
+3. In the AWS Console, go to **CloudWatch → Alarms** and watch
+   `week1-crud-app-cpu-high` move from OK to ALARM (takes ~2-4 minutes,
+   since the alarm needs 2 consecutive 60-second periods above 70%)
+4. Go to **EC2 → Auto Scaling Groups → week1-crud-app-asg → Activity** and
+   watch a new instance launch
+5. Screenshot both the alarm state and the scaling activity - these are your
+   Week 4 deliverables ("screenshot of scaling activity", "CloudWatch alarm
+   screenshot")
+6. Let the `stress` command finish (or Ctrl+C it) - CPU drops, and after a
+   few minutes `week1-crud-app-cpu-low` fires and scales back down
+
+## Viewing logs
+
+AWS Console → **CloudWatch → Log groups → /week1-crud-app/app** → click into
+a log stream (one per instance) to see live application output.
+
+## Files changed this week
+
+| File | What changed |
+|---|---|
+| `main.tf` | Added `aws_ssm_parameter`, `aws_cloudwatch_log_group`, two scoped IAM policies |
+| `variables.tf` | Added `ssh_allowed_cidr`, `log_retention_days` |
+| `outputs.tf` | Added `cloudwatch_log_group`, `db_password_parameter` |
+| `user_data.sh.tpl` | Fetches DB password from Parameter Store at runtime instead of receiving it directly; added `awslogs` log driver to the `docker run` command |
+
+

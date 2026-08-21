@@ -33,3 +33,13 @@ output "ssh_private_key" {
   value       = tls_private_key.app.private_key_pem
   sensitive   = true
 }
+
+output "cloudwatch_log_group" {
+  description = "CloudWatch Logs group receiving application container logs"
+  value       = aws_cloudwatch_log_group.app.name
+}
+
+output "db_password_parameter" {
+  description = "Parameter Store name holding the DB password"
+  value       = aws_ssm_parameter.db_password.name
+}

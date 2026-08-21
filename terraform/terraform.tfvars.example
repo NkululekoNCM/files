@@ -4,12 +4,19 @@
 aws_region   = "us-east-1"
 project_name = "week1-crud-app"
 
-docker_image = "YOUR_DOCKERHUB_USERNAME/week1-crud-app:latest"
+docker_image = "nkululekomahlangu/week1-crud-app:latest"
 
 db_name     = "appdb"
 db_username = "appuser"
-db_password = "ChangeMe123!"   # use a strong password, do not commit the real one
+db_password = "Nkululeko78"   # use a strong password without / @ " or spaces - never commit the real one
 
 asg_min_size         = 2
-asg_max_size          = 4
+asg_max_size         = 4
 asg_desired_capacity = 2
+
+# SSH is left open to 0.0.0.0/0 by default because the GitHub Actions
+# pipeline needs it (see README "Week 4 security tradeoffs"). No change
+# needed here unless you're deliberately tightening it for personal use.
+ssh_allowed_cidr = "0.0.0.0/0"
+
+log_retention_days = 14
